@@ -5,7 +5,7 @@ import {
   GetOptions,
 } from 'couchbase';
 
-import {CouchbaseScope, CouchbaseCollection, FlagRecord} from '../flags';
+import {CouchbaseScope, CouchbaseCollection, Record} from '../flags';
 
 const cbTimeoutInMilli = 3000;
 
@@ -29,7 +29,7 @@ export class Reader {
       .collection(CouchbaseCollection);
   }
 
-  validateDeps(cluster: Cluster, bucket: string): void {
+  private validateDeps(cluster: Cluster, bucket: string): void {
     const missingDeps: string[] = [
       {
         dep: 'clusterConnection',
@@ -57,7 +57,7 @@ export class Reader {
 
   // get retrieves a flag record using the given id. throws
   //  DocumentNotFoundError if no record is found.
-  public async get(id: string): Promise<FlagRecord> {
+  public async get(id: string): Promise<Record> {
     const options: GetOptions = {
       timeout: cbTimeoutInMilli,
     };
@@ -74,7 +74,7 @@ export class Reader {
   }
 }
 
-function validateFlag(object: any): FlagRecord {
+function validateFlag(object: any): Record {
   if (typeof object !== 'object') {
     throw new Error('unable to unmarshal result content');
   }
@@ -114,7 +114,7 @@ function validateFlag(object: any): FlagRecord {
   return {
     id: object.id,
     name: object.name,
-    default: object.default,
+    defaultValue: object.defaultValue,
     tags: object.tags,
     rules: object.rules,
   };

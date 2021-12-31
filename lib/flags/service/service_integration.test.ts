@@ -1,5 +1,5 @@
 import {Cluster, connect, DocumentNotFoundError} from 'couchbase';
-import {Reader, FlagRecord, Writer, Service} from '../flags';
+import {Reader, Record, Writer, Service} from '../flags';
 
 let s: Service;
 let cfg: config;
@@ -14,7 +14,9 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await cluster.close();
+  if (cluster !== undefined) {
+    await cluster.close();
+  }
 });
 
 beforeEach(() => {
@@ -22,11 +24,12 @@ beforeEach(() => {
 });
 
 describe('ServiceCouchbaseDBIntegration', () => {
-  const record: FlagRecord = {
+  const record: Record = {
     id: 'test' + Math.random(),
     name: 'ff',
-    default: true,
+    defaultValue: true,
   };
+  jest.setTimeout(100000);
 
   test('Service should be able create flag records', async () => {
     // create
@@ -35,8 +38,16 @@ describe('ServiceCouchbaseDBIntegration', () => {
 
   test('Service should be able to get flag records', async () => {
     // get check
-    const r: FlagRecord = await s.reader.get(record.id);
+    const r: Record = await s.reader.get(record.id);
     expect(r).toEqual(record);
+  });
+
+  test('Service should be able to update the flag records default value', async () => {
+    await s.setDefaultFlagValue(record.id, false);
+
+    // ensure the value was updated
+    const r: Record = await s.reader.get(record.id);
+    expect(r.defaultValue).toEqual(false);
   });
 
   test('Service should be able to delete flag records', async () => {

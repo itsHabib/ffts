@@ -1,6 +1,6 @@
 import {Cluster, connect as cbConnect, ConnectOptions} from 'couchbase';
-import {Reader} from './lib/flags/reader/reader';
-import {FlagRecord} from './lib/flags/flags';
+import {Reader} from '../lib/flags/reader/reader';
+import {Record} from '../lib/flags/flags';
 
 run()
   .then(() => {
@@ -25,6 +25,6 @@ async function run(): Promise<void> {
   }
 
   const reader = new Reader(cluster, bucket);
-  const record: FlagRecord = await reader.get('tester');
+  const record: Record = await reader.get('tester');
   console.log('record: %s', record);
 }

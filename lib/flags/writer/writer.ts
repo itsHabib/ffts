@@ -4,11 +4,20 @@ import {
   DocumentNotFoundError,
   DurabilityLevel,
   InsertOptions,
+  QueryOptions,
+  QueryScanConsistency,
   RemoveOptions,
 } from 'couchbase';
-import {CouchbaseCollection, CouchbaseScope, FlagRecord} from '../flags';
+import {CouchbaseCollection, CouchbaseScope, Record} from '../flags';
+import {
+  Builder,
+  ConditionOp,
+  FullyQualifiedName,
+  Update,
+  Where,
+} from '../../couchbase/query/query';
 
-const cbTimeoutInMilli = 3000;
+const cbTimeoutInMilli = 5000;
 
 // Writer class is responsible for creating and manipulating flag records
 // in the database. A writer has the following dependencies:
@@ -30,7 +39,7 @@ export class Writer {
       .collection(CouchbaseCollection);
   }
 
-  validateDeps(cluster: Cluster, bucket: string): void {
+  private validateDeps(cluster: Cluster, bucket: string): void {
     const missingDeps: string[] = [
       {
         dep: 'clusterConnection',
@@ -57,7 +66,7 @@ export class Writer {
   }
 
   // create will create a new flag record in the database
-  public async create(record: FlagRecord): Promise<void> {
+  public async create(record: Record): Promise<void> {
     const options: InsertOptions = {
       timeout: cbTimeoutInMilli,
       durabilityLevel: DurabilityLevel.None,
@@ -87,6 +96,45 @@ export class Writer {
       }
       console.error('unable to delete record: %s', e);
       // TODO: create own error types
+      throw e;
+    }
+  }
+
+  // updateFields attempts to update only the specific fields in the record.
+  public async updateFields(id: string, ...updates: Update[]): Promise<void> {
+    const where: Where = {
+      field: 'id',
+      value: id,
+      operation: ConditionOp.EQ,
+    };
+    const fqn = FullyQualifiedName(this.bucket, {
+      scope: CouchbaseScope,
+      collection: CouchbaseCollection,
+    });
+
+    const qb: Builder = new Builder();
+    let query: string;
+    let params: {[key: string]: any};
+
+    try {
+      [query, params] = qb.buildUpdate(fqn, updates, [where], 1);
+    } catch (e) {
+      console.error('unable to build update query: %s', e);
+      throw e;
+    }
+
+    try {
+      const queryOptions: QueryOptions = {
+        timeout: cbTimeoutInMilli,
+        // TODO: if time allows check it this adds too much of a time cost
+        scanConsistency: QueryScanConsistency.RequestPlus,
+        parameters: params,
+      };
+      console.log('query: %s', query);
+      console.log('params: %s', params);
+      await this.cluster.query(query, queryOptions);
+    } catch (e) {
+      console.error('unable to update record: %s', e);
       throw e;
     }
   }

@@ -1,4 +1,4 @@
-export {FlagRecord} from './record';
+export {Record} from './record';
 export {Reader} from './reader/reader';
 export {Writer} from './writer/writer';
 export {Service} from './service/service';

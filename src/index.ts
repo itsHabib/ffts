@@ -1,5 +1,5 @@
 import {Cluster, connect as cbConnect, ConnectOptions} from 'couchbase';
-import {Reader} from '../lib/flags/reader/reader';
+import {Index} from '../lib/flags/reader/reader';
 import {Record} from '../lib/flags/flags';
 
 run()
@@ -24,7 +24,7 @@ async function run(): Promise<void> {
     throw new Error(`unable to connect to couchbase: ${e}`);
   }
 
-  const reader = new Reader(cluster, bucket);
+  const reader = new Index(cluster, bucket);
   const record: Record = await reader.get('tester');
   console.log('record: %s', record);
 }

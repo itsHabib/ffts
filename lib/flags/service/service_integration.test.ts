@@ -1,5 +1,8 @@
 import {Cluster, connect, DocumentNotFoundError} from 'couchbase';
-import {Reader, Record, Writer, Service} from '../flags';
+import {Record} from '../';
+import Writer from '../writer';
+import Reader from '../reader';
+import Service from '../service';
 
 let s: Service;
 let cfg: config;
@@ -44,6 +47,8 @@ describe('ServiceCouchbaseDBIntegration', () => {
 
   test('Service should be able to update the flag records default value', async () => {
     await s.setDefaultFlagValue(record.id, false);
+    // just to make sure it is updated b4 the read
+    await new Promise(r => setTimeout(r, 200));
 
     // ensure the value was updated
     const r: Record = await s.reader.get(record.id);

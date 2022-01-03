@@ -8,7 +8,7 @@ import {
   QueryScanConsistency,
   RemoveOptions,
 } from 'couchbase';
-import {CouchbaseCollection, CouchbaseScope, Record} from '../flags';
+import {CouchbaseCollection, CouchbaseScope, Record} from '../';
 import {
   Builder,
   ConditionOp,
@@ -23,7 +23,7 @@ const cbTimeoutInMilli = 5000;
 // in the database. A writer has the following dependencies:
 // cluster - the connection to CB
 // bucket - the Couchbase bucket
-export class Writer {
+export default class Writer {
   private cluster: Cluster;
   private bucket: string;
   private collection: Collection;
@@ -126,8 +126,6 @@ export class Writer {
     try {
       const queryOptions: QueryOptions = {
         timeout: cbTimeoutInMilli,
-        // TODO: if time allows check it this adds too much of a time cost
-        scanConsistency: QueryScanConsistency.RequestPlus,
         parameters: params,
       };
       console.log('query: %s', query);

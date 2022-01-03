@@ -5,7 +5,7 @@ import {
   GetOptions,
 } from 'couchbase';
 
-import {CouchbaseScope, CouchbaseCollection, Record} from '../flags';
+import {CouchbaseScope, CouchbaseCollection, Record} from '../';
 
 const cbTimeoutInMilli = 3000;
 
@@ -13,7 +13,7 @@ const cbTimeoutInMilli = 3000;
 // reader has the following dependencies:
 // cluster - the connection to CB
 // bucket - the Couchbase bucket
-export class Reader {
+export default class Reader {
   private cluster: Cluster;
   private bucket: string;
   private collection: Collection;

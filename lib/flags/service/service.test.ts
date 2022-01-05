@@ -2,11 +2,10 @@ import Writer from '../writer';
 import Reader from '../reader';
 import Service from './';
 import {Cluster} from 'couchbase';
-import {RuleChain, RuleOp} from '../';
+import {Rule, RuleChain, RuleOp} from '../';
 
 jest.mock('../writer');
 jest.mock('../reader');
-// jest.mock('couchbase');
 
 describe('Test_Service_newRuleChain', () => {
   let c: Cluster;
@@ -15,8 +14,7 @@ describe('Test_Service_newRuleChain', () => {
   let s: Service;
 
   beforeEach(() => {
-    Reader.mockClear();
-    Writer.mockClear();
+    jest.clearAllMocks();
 
     c = new Cluster('', {});
     r = new Reader(c, 'bucket');
@@ -35,30 +33,39 @@ describe('Test_Service_newRuleChain', () => {
       });
     });
 
-    // TODO: fix
-    // await expect(() => s.addRuleChain('id', {Rules: []})).rejects.toThrow();
+    const rc: RuleChain = {
+      PrimaryRule: {
+        ruleOp: RuleOp.EQUALS,
+        tag: {
+          name: 'name',
+          value: 'value',
+        },
+      },
+    };
+    await expect(() => s.addRuleChain('id', rc)).rejects.toThrow();
   });
 
-  // TODO: fix
-  // test('should throw an error when the rule chain to be added is invalid.', async () => {
-  //   mockReaderGet();
-  //   const rc: RuleChain = {
-  //     Rules: [
-  //       {
-  //         tag: 'tag',
-  //         ruleOp: RuleOp.EQUALS,
-  //         value: 'value',
-  //       },
-  //       {
-  //         tag: 'tag2',
-  //         ruleOp: RuleOp.EQUALS,
-  //         value: 'value2',
-  //       },
-  //     ],
-  //   };
-  //
-  //   await expect(() => s.addRuleChain('id', rc)).rejects.toThrow();
-  // });
+  test('should throw an error when the rule chain to be added is invalid.', async () => {
+    mockReaderGet();
+    const rc: RuleChain = {
+      PrimaryRule: {
+        tag: {
+          name: 'test',
+          value: 'value',
+        },
+        ruleOp: RuleOp.EQUALS,
+      },
+      SecondaryRule: {
+        tag: {
+          name: 'tag2',
+          value: 'value2',
+        },
+        ruleOp: RuleOp.EQUALS,
+      },
+    };
+
+    await expect(() => s.addRuleChain('id', rc)).rejects.toThrow();
+  });
 
   // TODO: do the rest
 });

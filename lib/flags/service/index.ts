@@ -1,16 +1,23 @@
 import {v4 as uuidv4} from 'uuid';
-import {Record} from '../';
+import {
+  FlagCheck,
+  Record,
+  Rule,
+  RuleChain,
+  RuleChainOp,
+  RuleOp,
+  Tag,
+} from '../';
 import Reader from '../reader';
 import Writer from '../writer';
 import {Update} from '../../couchbase/query/query';
-import {Rule, RuleChain, Tag} from '../';
 
 /// arbitrary limits
 
-const MAX_RULES_IN_CHAIN = 2;
-// rule blocks describe a unique set of tags and its rules
+const MAX_TAGS_IN_CHECK = 2;
+// rule blocks describe a unique set of tags and its ruleBlocks
 const MAX_RULE_BLOCKS = 10;
-const MAX_RULES_IN_BLOCK = 25;
+const MAX_RULES_IN_BLOCK = 10;
 
 // Service is responsible for managing feature flags for users. It has the
 // following dependencies:
@@ -26,6 +33,268 @@ export default class Service {
     this.writer = writer;
 
     this.validate();
+  }
+
+  // newFlag creates a new flag record in the database in a managed environment,
+  //  the amount of tags can be controlled by the plan a user is on.
+  public async newFlag(name: string, defaultValue: boolean): Promise<Record> {
+    const rec: Record = {
+      id: uuidv4(),
+      name: name,
+      defaultValue: defaultValue,
+    };
+
+    await this.writer.create(rec);
+    console.log('created new flag with id: %s', rec.id);
+
+    return rec;
+  }
+
+  // addRuleChain creates a new rule block or adds the new rule chain to an
+  //  existing rule block.
+  public async addRuleChain(id: string, rc: RuleChain): Promise<void> {
+    let rec: Record;
+    try {
+      rec = await this.reader.get(id);
+    } catch (e) {
+      console.error('unable to find flag with id: %s', id);
+      throw e;
+    }
+
+    if (rec.ruleBlocks === undefined) {
+      rec.ruleBlocks = {};
+    }
+
+    // make sure the rule chain is valid and can be added to the ruleBlocks
+    try {
+      this.processNewRuleChain(rec.ruleBlocks, rc);
+    } catch (e) {
+      console.error('unable to process new rule chain: %s', e);
+      throw e;
+    }
+
+    try {
+      await this.writer.updateFields(rec.id, {
+        field: 'ruleBlocks',
+        value: rec.ruleBlocks,
+      });
+    } catch (e) {
+      console.error('unable to update flag with new rule chain: %s', e);
+      throw e;
+    }
+  }
+
+  // setDefaultFlagValue updates the default value field of a flag record with
+  // using the given parameter.
+  public async setDefaultFlagValue(
+    id: string,
+    defaultValue: boolean
+  ): Promise<void> {
+    const update: Update = {
+      field: 'defaultValue',
+      value: defaultValue,
+    };
+    try {
+      await this.writer.updateFields(id, update);
+      console.log('updated flag with id: %s', id);
+    } catch (e) {
+      console.error('unable to update record: %s', e);
+      throw e;
+    }
+  }
+
+  public async checkFlagRule(id: string, tags: Tag[]): Promise<boolean> {
+    let rec: Record;
+    try {
+      rec = await this.reader.get(id);
+    } catch (e) {
+      console.error('unable to get flag record from id(%s): %s', id, e);
+      throw e;
+    }
+
+    if (rec.defaultValue) {
+      return true;
+    }
+
+    if (rec.ruleBlocks === undefined) {
+      return false;
+    }
+
+    return this.checkBlocks(rec.ruleBlocks, tags);
+  }
+
+  public checkBlocks(
+    ruleBlocks: {[key: string]: RuleChain[]},
+    tags: Tag[]
+  ): boolean {
+    if (tags.length > MAX_TAGS_IN_CHECK) {
+      throw new Error('unable to check flag rule, too many tags');
+    }
+
+    // get rule block key from tags given
+    const flagCheck: FlagCheck = formFlagCheck(tags);
+    const key = getKeyFromFlagCheck(flagCheck);
+    const ruleBlock = ruleBlocks[key];
+    if (ruleBlock === undefined) {
+      return false;
+    }
+
+    return this.checkRuleBlock(ruleBlock, flagCheck);
+  }
+
+  private checkRuleBlock(rc: RuleChain[], fc: FlagCheck): boolean {
+    // go through each rule and try to find a true statement.
+    for (let i = 0; i < rc.length; i++) {
+      if (this.checkRuleChain(rc[i], fc)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private checkRuleChain(rc: RuleChain, fc: FlagCheck): boolean {
+    const left = this.checkRule(rc.PrimaryRule, fc.PrimaryTag);
+
+    // account for no second rule and short-circuiting from the chain
+    if (
+      rc.SecondaryRule === undefined ||
+      fc.SecondaryTag === undefined ||
+      (left && rc.ChainOp === RuleChainOp.OR) ||
+      (!left && rc.ChainOp === RuleChainOp.AND)
+    ) {
+      return left;
+    }
+
+    const right = this.checkRule(rc.SecondaryRule, fc.SecondaryTag);
+
+    switch (rc.ChainOp) {
+      case RuleChainOp.AND:
+        return and(left, right);
+      case RuleChainOp.OR:
+        return or(left, right);
+      default:
+        // shouldn't happen since we validate
+        throw new Error('unable to check rule chain, invalid rule chain op');
+    }
+  }
+
+  private checkRule(rule: Rule, tag: Tag): boolean {
+    let test: boolean;
+    switch (rule.ruleOp) {
+      case RuleOp.CONTAINS:
+        test = tag.value.includes(rule.tag.value);
+        if (rule.not !== undefined && rule.not) {
+          test = !test;
+        }
+        return test;
+      case RuleOp.ENDS_WITH:
+        test = tag.value.endsWith(rule.tag.value);
+        if (rule.not) {
+          test = !test;
+        }
+        return test;
+      case RuleOp.EQUALS:
+        test = rule.tag.value === tag.value;
+        if (rule.not) {
+          test = !test;
+        }
+        return test;
+      case RuleOp.STARTS_WITH:
+        test = tag.value.startsWith(rule.tag.value);
+        if (rule.not) {
+          test = !test;
+        }
+        return test;
+      default:
+        throw new Error('unable to form rule check');
+    }
+  }
+
+  // processNewRuleChain validates that the rule chain can be added to the
+  // passed in ruleBlocks map. If the rule chain is valid, it is added to the ruleBlocks
+  // map.
+  private processNewRuleChain(
+    rules: {[key: string]: RuleChain[]},
+    rc: RuleChain
+  ): void {
+    this.validateNewRuleChain(rules, rc);
+
+    const rcKey = getKeyFromRuleChain(rc);
+    const chains: RuleChain[] = rules[rcKey] || [];
+
+    for (const c of chains) {
+      if (equalChains(c, rc)) {
+        throw new Error(
+          `unable to process new rule chain due to duplicate rule chain: ${JSON.stringify(
+            c
+          )}`
+        );
+      }
+    }
+
+    chains.push(rc);
+    rules[rcKey] = chains;
+  }
+
+  private validateNewRuleChain(
+    rules: {[key: string]: RuleChain[]},
+    rc: RuleChain
+  ): void {
+    // ensure tags are valid
+    if (
+      rc.PrimaryRule.tag.name === '' ||
+      (rc.SecondaryRule !== undefined && rc.SecondaryRule.tag.name === '')
+    ) {
+      throw new Error('unable to process new rule chain due to empty tag(s)');
+    }
+
+    // ensure values are valid
+    if (
+      rc.PrimaryRule.tag.value === '' ||
+      (rc.SecondaryRule !== undefined && rc.SecondaryRule.tag.value === '')
+    ) {
+      throw new Error(
+        'unable to process new rule chain due to empty tag value(s)'
+      );
+    }
+
+    // ensure rule ops are valid
+    if (
+      !validRuleOp(rc.PrimaryRule.ruleOp) ||
+      (rc.SecondaryRule !== undefined && !validRuleOp(rc.SecondaryRule.ruleOp))
+    ) {
+      throw new Error(
+        'unable to process new rule chain due to invalid rule op(s)'
+      );
+    }
+
+    // ensure there is a chain op if we have more than one rule in the chain
+    if (
+      rc.SecondaryRule !== undefined &&
+      (rc.ChainOp === undefined ||
+        (rc.ChainOp !== RuleChainOp.AND && rc.ChainOp !== RuleChainOp.OR))
+    ) {
+      throw new Error(
+        'unable to process new rule chain due to missing chain op'
+      );
+    }
+
+    const rcKey = getKeyFromRuleChain(rc);
+    const chains: RuleChain[] | undefined = rules[rcKey];
+    if (chains === undefined && Object.keys(rules).length === MAX_RULE_BLOCKS) {
+      throw new Error(
+        `unable to process new rule chain due to too many rule blocks: ${MAX_RULE_BLOCKS}`
+      );
+    } else if (chains === undefined) {
+      return;
+    }
+
+    if (chains.length + 1 > MAX_RULES_IN_BLOCK) {
+      throw new Error(
+        `unable to process new rule chain due to too many rules in block: ${chains.length}`
+      );
+    }
   }
 
   private validate(): void {
@@ -56,171 +325,79 @@ export default class Service {
       );
     }
   }
-
-  // newFlag creates a new flag record in the database in a managed environment,
-  //  the amount of tags can be controlled by the plan a user is on.
-  public async newFlag(
-    name: string,
-    defaultValue: boolean,
-    ...tags: string[]
-  ): Promise<Record> {
-    const rec: Record = {
-      id: uuidv4(),
-      name: name,
-      defaultValue: defaultValue,
-    };
-
-    if (tags.length > 0) {
-      rec.tags = new Set(tags);
-    }
-
-    await this.writer.create(rec);
-    console.log('created new flag with id: %s', rec.id);
-
-    return rec;
-  }
-
-  // newRuleChain creates a new rule block or add the new rule chain to an
-  //  existing rule block.
-  public async newRuleChain(id: string, rc: RuleChain): Promise<void> {
-    let rec: Record;
-    try {
-      rec = await this.reader.get(id);
-    } catch (e) {
-      console.error('unable to find flag with id: %s', id);
-      throw e;
-    }
-
-    if (rec.rules === undefined) {
-      rec.rules = new Map<string, RuleChain[]>();
-    }
-
-    // make sure the rule chain is valid and can be added to the rules
-    try {
-      this.processNewRuleChain(rec.rules, rc);
-    } catch (e) {
-      console.error('unable to process new rule chain: %s', e);
-      throw e;
-    }
-
-    try {
-      await this.writer.updateFields(rec.id, {
-        field: 'rules',
-        value: rec.rules,
-      });
-    } catch (e) {
-      console.error('unable to update flag with new rule chain: %s', e);
-      throw e;
-    }
-  }
-
-  // setDefaultFlagValue updates the default value field of a flag record with
-  // using the given parameter.
-  public async setDefaultFlagValue(
-    id: string,
-    defaultValue: boolean
-  ): Promise<void> {
-    const update: Update = {
-      field: 'defaultValue',
-      value: defaultValue,
-    };
-    try {
-      await this.writer.updateFields(id, update);
-      console.log('updated flag with id: %s', id);
-    } catch (e) {
-      console.error('unable to update record: %s', e);
-      throw e;
-    }
-  }
-
-  // processNewRuleChain validates that the rule chain can be added to the
-  // passed in rules map. The rule chain can only contain a maximum of 2 rules
-  //  and there can not already be an existing rule chain already present. If
-  // the rule chain is valid, it is added to the rules map.
-  private processNewRuleChain(
-    rules: Map<string, RuleChain[]>,
-    rc: RuleChain
-  ): void {
-    this.validateNewRuleChain(rules, rc);
-
-    const rcKey = getRuleChainKey(rc);
-    const chains: RuleChain[] = rules.get(rcKey) || [];
-
-    for (const c of chains) {
-      if (equalChains(c, rc)) {
-        throw new Error(
-          `unable to process new rule chain due to duplicate rule chain: ${JSON.stringify(
-            c
-          )}`
-        );
-      }
-    }
-
-    chains.push(rc);
-    rules.set(rcKey, chains);
-  }
-
-  private validateNewRuleChain(
-    rules: Map<string, RuleChain[]>,
-    rc: RuleChain
-  ): void {
-    if (rc.Rules.length > MAX_RULES_IN_CHAIN) {
-      throw new Error(
-        `unable to process new rule chain due to too many rules in chain: ${rc.Rules.length}`
-      );
-    }
-
-    // ensure there is a chain op if we have more than one rule in the chain
-    if (rc.Rules.length > 1 && rc.ChainOp === undefined) {
-      throw new Error(
-        'unable to process new rule chain due to missing chain op'
-      );
-    }
-
-    const rcKey = getRuleChainKey(rc);
-    const chains: RuleChain[] | undefined = rules.get(rcKey);
-    if (chains === undefined && rules.size === MAX_RULE_BLOCKS) {
-      throw new Error(
-        `unable to process new rule chain due to too many rule blocks: ${rules.size}`
-      );
-    } else if (chains === undefined) {
-      return;
-    }
-
-    if (chains.length + rc.Rules.length > MAX_RULES_IN_BLOCK) {
-      throw new Error(
-        `unable to process new rule chain due to too many rules in block: ${
-          chains.length + rc.Rules.length
-        }`
-      );
-    }
-  }
 }
 
-function getRuleChainKey(rc: RuleChain): string {
-  if (rc.Rules.length === 0) {
+function formFlagCheck(tags: Tag[]): FlagCheck {
+  tags.sort((a, b) => a.name.localeCompare(b.name));
+
+  const fc: FlagCheck = {
+    PrimaryTag: tags[0],
+  };
+
+  if (tags.length < MAX_TAGS_IN_CHECK) {
+    return fc;
+  }
+  fc.SecondaryTag = tags[1];
+
+  return fc;
+}
+
+function getKeyFromRuleChain(rc: RuleChain): string {
+  if (rc.PrimaryRule.tag.name === '') {
     return '';
   }
 
-  return rc.Rules.reduce(
-    (acc: string, cur: Rule): string => acc + '+' + cur.tag,
-    ''
+  if (rc.SecondaryRule === undefined) {
+    return rc.PrimaryRule.tag.name.toLowerCase();
+  }
+
+  let key = rc.PrimaryRule.tag.name.toLowerCase();
+  if (rc.PrimaryRule.tag.name < rc.SecondaryRule.tag.name) {
+    key += '+' + rc.SecondaryRule.tag.name.toLowerCase();
+  } else {
+    key = rc.SecondaryRule.tag.name.toLowerCase() + '+' + key;
+  }
+
+  return key;
+}
+
+function getKeyFromFlagCheck(fc: FlagCheck): string {
+  if (fc.SecondaryTag === undefined || fc.SecondaryTag.name === '') {
+    return fc.PrimaryTag.name.toLowerCase();
+  }
+
+  return (
+    fc.PrimaryTag.name.toLowerCase() + '+' + fc.SecondaryTag.name.toLowerCase()
   );
 }
 
 function equalChains(a: RuleChain, b: RuleChain): boolean {
-  if (a.Rules.length !== b.Rules.length || a.ChainOp !== b.ChainOp) {
-    return false;
-  }
+  return (
+    a.PrimaryRule === b.PrimaryRule &&
+    a.SecondaryRule === b.SecondaryRule &&
+    a.ChainOp === b.ChainOp
+  );
+}
 
-  a.Rules.sort((a, b) => a.value.length - b.value.length);
-  b.Rules.sort((a, b) => a.value.length - b.value.length);
-
-  for (let i = 0; i < a.Rules.length; i++) {
-    if (a.Rules[i] !== b.Rules[i]) {
+function validRuleOp(ruleOp: RuleOp): boolean {
+  switch (ruleOp) {
+    case RuleOp.CONTAINS:
+      return true;
+    case RuleOp.ENDS_WITH:
+      return true;
+    case RuleOp.EQUALS:
+      return true;
+    case RuleOp.STARTS_WITH:
+      return true;
+    default:
       return false;
-    }
   }
+}
 
-  return true;
+function and(a: boolean, b: boolean): boolean {
+  return a && b;
+}
+
+function or(a: boolean, b: boolean): boolean {
+  return a || b;
 }

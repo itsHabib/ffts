@@ -128,8 +128,6 @@ export default class Writer {
         timeout: cbTimeoutInMilli,
         parameters: params,
       };
-      console.log('query: %s', query);
-      console.log('params: %s', params);
       await this.cluster.query(query, queryOptions);
     } catch (e) {
       console.error('unable to update record: %s', e);

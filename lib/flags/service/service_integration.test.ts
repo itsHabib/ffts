@@ -1,5 +1,5 @@
 import {Cluster, connect, DocumentNotFoundError} from 'couchbase';
-import {Record} from '../';
+import {Record, RuleChain, RuleChainOp, RuleOp} from '../';
 import Writer from '../writer';
 import Reader from '../reader';
 import Service from '../service';
@@ -26,13 +26,125 @@ beforeEach(() => {
   s = getService(cluster, cfg);
 });
 
+describe('ServiceFlagIntegration', () => {
+  jest.setTimeout(10000000);
+
+  let id: string;
+  test('Service should be able create flag records', async () => {
+    // new flag
+    const record = await s.newFlag('fancy-feature', false);
+    id = record.id;
+
+    // pause for potential db delay
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    await s.reader.get(record.id);
+  });
+
+  test('Service should be able to create a rule chain', async () => {
+    const rc: RuleChain = {
+      PrimaryRule: {
+        tag: {
+          name: 'env',
+          value: 'dev',
+        },
+        ruleOp: RuleOp.EQUALS,
+      },
+    };
+    await s.addRuleChain(id, rc);
+  });
+
+  test('Service should be able to check flag rules', async () => {
+    const value = await s.checkFlagRule(id, [
+      {
+        name: 'env',
+        value: 'dev',
+      },
+    ]);
+    expect(value).toEqual(true);
+
+    const falseChk = await s.checkFlagRule(id, [
+      {
+        name: 'env',
+        value: 'prod',
+      },
+    ]);
+    expect(falseChk).toEqual(false);
+  });
+
+  test('Service should be able to create compound rule chains', async () => {
+    const rc: RuleChain = {
+      PrimaryRule: {
+        tag: {
+          name: 'env',
+          value: 'dev',
+        },
+        ruleOp: RuleOp.EQUALS,
+      },
+      SecondaryRule: {
+        tag: {
+          name: 'org',
+          value: 'internal',
+        },
+        ruleOp: RuleOp.STARTS_WITH,
+      },
+      ChainOp: RuleChainOp.AND,
+    };
+    await s.addRuleChain(id, rc);
+
+    // pause for potential db delay
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    const record = await s.reader.get(id);
+    expect(record.ruleBlocks).toBeDefined();
+    expect(Object.keys(record.ruleBlocks!)).toHaveLength(2);
+    expect(record.ruleBlocks!['env']).toBeDefined();
+    expect(record.ruleBlocks!['env+org']).toBeDefined();
+  });
+
+  test('Service should be able to check against compound flag rules', async () => {
+    const value = await s.checkFlagRule(id, [
+      {
+        name: 'env',
+        value: 'dev',
+      },
+      {
+        name: 'org',
+        value: 'internal-se',
+      },
+    ]);
+    expect(value).toEqual(true);
+
+    const falseChk = await s.checkFlagRule(id, [
+      {
+        name: 'env',
+        value: 'prod',
+      },
+      {
+        name: 'org',
+        value: 'non-internal',
+      },
+    ]);
+    expect(falseChk).toEqual(false);
+  });
+
+  test('Service should be able to delete flag records', async () => {
+    // delete record check
+    await s.writer.delete(id);
+
+    // ensure get returns an error now
+    await expect(s.reader.get(id)).rejects.toThrowError(DocumentNotFoundError);
+  });
+});
+
 describe('ServiceCouchbaseDBIntegration', () => {
+  jest.setTimeout(10000);
+
   const record: Record = {
     id: 'test' + Math.random(),
     name: 'ff',
     defaultValue: true,
   };
-  jest.setTimeout(100000);
 
   test('Service should be able create flag records', async () => {
     // create

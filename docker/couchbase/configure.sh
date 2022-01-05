@@ -53,6 +53,10 @@ if ! couchbase-cli server-list -c localhost:8091 -u Administrator -p password >/
     --bucket 'local' \
     --create-collection 'users.flags'
 
+
+  sleep 15
+
+  cbq -u Administrator -p password -s="CREATE PRIMARY INDEX ON \`local\`.users.flags;"
 fi
 
 fg 1

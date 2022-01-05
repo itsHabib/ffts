@@ -11,43 +11,46 @@ export type Record = {
   id: string;
   // name of the feature flag
   name: string;
-  // default value of the feature flag. This value overrides any rules. If the
-  // flag is set, no rules will be parsed.
+  // default value of the feature flag. This value overrides any ruleBlocks. If the
+  // flag is set, no ruleBlocks will be parsed.
   defaultValue: boolean;
-  // tags of the feature flag that are used for variation rules.
-  // TODO: might not need this
-  tags?: Set<string>;
-  // rules of the feature flag based on the tags for the flag. The key is
-  // meant to be the tag and the value being the rules associated with that
-  // tag. A rule chain is used to chain two rules with an AND/OR operation.
+  // ruleBlocks of the feature flag based on the tags for the flag. The key is
+  // meant to be the tag and the value being the ruleBlocks associated with that
+  // tag. A rule chain is used to chain two ruleBlocks with an AND/OR operation.
   //  At the moment, only two tags are supported in a rule chain.
-  rules?: Map<string, RuleChain[]>;
+  ruleBlocks?: {[key: string]: RuleChain[]};
 };
 
 export type RuleChain = {
-  Rules: Rule[];
+  PrimaryRule: Rule;
+  SecondaryRule?: Rule;
   ChainOp?: RuleChainOp;
 };
 
 export type Rule = {
-  tag: string;
-  not: boolean;
+  tag: Tag;
+  not?: boolean;
   ruleOp: RuleOp;
-  value: string;
 };
 
 export enum RuleOp {
-  EQUALS,
-  STARTS_WITH,
-  ENDS_WITH,
-  CONTAINS,
+  EQUALS = 'EQUALS',
+  STARTS_WITH = 'STARTS_WITH',
+  ENDS_WITH = 'ENDS_WITH',
+  CONTAINS = 'CONTAINS',
 }
 
 export enum RuleChainOp {
-  AND,
-  OR,
+  AND = 'AND',
+  OR = 'OR',
 }
 
 export type Tag = {
   name: string;
+  value: string;
+};
+
+export type FlagCheck = {
+  PrimaryTag: Tag;
+  SecondaryTag?: Tag;
 };

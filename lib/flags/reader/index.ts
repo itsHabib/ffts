@@ -92,7 +92,7 @@ function validateFlag(object: any): Record {
         object['name'] !== undefined && typeof object['name'] !== 'string',
     },
     {
-      key: 'default',
+      key: 'defaultValue',
       chk: (): boolean =>
         object['default'] !== undefined &&
         typeof object['default'] !== 'boolean',
@@ -115,7 +115,6 @@ function validateFlag(object: any): Record {
     id: object.id,
     name: object.name,
     defaultValue: object.defaultValue,
-    tags: object.tags,
-    rules: object.rules,
+    ruleBlocks: object.ruleBlocks,
   };
 }

@@ -8,8 +8,7 @@
     "lint": "gts lint",
     "clean": "gts clean",
     "compile": "tsc",
-    "fix": "gts fix",
-    "dev": "node build/src/index.js"
+    "fix": "gts fix"
   },
   "author": "itsHabib",
   "license": "ISC",
